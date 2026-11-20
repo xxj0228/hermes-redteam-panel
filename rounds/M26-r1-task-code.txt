@@ -1,0 +1,44 @@
+【附带发现的另外两道门】
+
+门 1: 后缀白名单（23 项）
+    scan_file 对表外后缀 return []，唯一例外是名为 SKILL.md 的文件。
+    所以只要把载荷写成 payload.ps1 / sitehook.pth / boot.mjs / run.lua / 无后缀，
+    扫描器连一个字节都不读。
+    .pyc / .pth / .ps1 都不在 SUSPICIOUS_BINARY_EXTENSIONS 里
+    —— 连"值得看一眼"的提示都不会有。
+
+门 3: docstring 行被屏蔽
+    _compute_docstring_lines(lines) 会算出 docstring 覆盖的行，这些行上代码类规则不匹配
+    （注释写明是为了"代码规则不要在散文上误报"）。
+    副作用: 把载荷放进 """...""" 里就绕过 python_os_system / subprocess 等规则。
+    （该载荷本身不执行，但它是二次展开的现成载体 —— 任何 exec(docstring) 或
+      模板渲染路径都会把它变成可执行。）
+
+限额未生效于内容扫描
+    MAX_SINGLE_FILE_KB = 256 只出现在结构检查里；scan_file 全程不引用该上限。
+    即: 超大文件并不会因为超限而跳过内容扫描（与 M54 假设方向相反，需单独复测）。
+
+【判定】
+    技能扫描器对 10 种载荷形态完全隐形                    本节矩阵，真 scan_skill() 返回 0 finding
+    同一载荷仅换编码即从 dangerous 变 safe               A vs E/F 三行对照
+    .pth（python 启动即执行）不在白名单且不受任何检查       C 行
+    Windows 脚本后缀全部不扫描                          B 行
+    agent-created 档位 high 级命中直接放行              INSTALL_POLICY + N 行实测 True
+    扫描器本身工作正常                                  A/J/K/N 四个对照组分别命中 2/4/2/3 条规则
+
+    => 不是扫描器没规则，是它读不到我们放规则的地方。
+
+【边界】
+    · 全部在 /dev/shm/m26 下构造，测完 rmtree 清理，靶机磁盘未留投递物
+    · 只测了 skills_guard；mcp_security 的差分见 M11-r2
+    · _resolve_trust_level() 对 "builtin"/"trusted" 字符串的实际映射未逐一核实
+      （dangerous 时三者都返回 False，与 INSTALL_POLICY 的 builtin=allow 不符）
+      => 本报告只采用 agent-created 与 community 两档的实测值
+    · 未验证 .pth 在靶机 hermes 解释器(3.14.7)下的实际加载路径 —— 只验证了"扫描器看不到它"
+    · 未验证 UTF-16 编码的 .py 能否被 python 正常执行（CPython 支持 UTF-16 BOM 源文件，需实测）
+
+【下一步】
+    r2  把 E（UTF-16 .py）接上真链路：既是"扫描器看不见"，也可能是"能跑" —— 一次验证两件事
+    r3  .pth 落地: site-packages/*.pth 在任意 python 启动时执行，含 MCP server 自身启动
+    r4  docstring 载体: 找 Hermes 里任何 exec/模板渲染 docstring 的路径，把门 3 变成可执行
+    r5  复核 MAX_SINGLE_FILE_KB 是否真的不参与内容扫描（M54 方向）

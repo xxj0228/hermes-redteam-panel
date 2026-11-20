@@ -1,0 +1,37 @@
+【M11-r2 · MCP 条目校验器差分（地面真值）】
+
+方法: 直接对靶机真校验器做差分，零靶机状态改动
+靶标: hermes_cli/mcp_security.py::validate_mcp_server_entry
+
+执行方式（agenttest 只读导入，不碰 admin01 配置）:
+    sys.path.insert(0, "/home/agenttest/.hermes/hermes-agent")
+    from hermes_cli import mcp_security as M
+    M.validate_mcp_server_entry("t", <entry>)
+
+校验器源码（实读）:
+    """Intentionally not a whitelist — custom commands, Python scripts, npx, uvx stay legal.
+    Only three narrow shapes are blocked:
+      (1) a known IOC anywhere in command/args/env
+      (2) a shell interpreter with network egress in its inline script
+      (3) a shell interpreter writing an OS persistence surface."""
+
+    flat = _entry_text(entry)
+    for ioc in _IOC_SUBSTRINGS:
+        if ioc in flat: return [issue]        # 5 个字符串的 in 判断
+
+    command = entry.get("command")
+    if _command_basename(command) not in _SHELL_INTERPRETERS:
+        return issues                          # 非 shell 解释器：到此为止
+
+    script = _inline_script(entry.get("args"))
+    if not script: return issues
+    if _EGRESS_PATTERN.search(script):     ...
+    if _PERSISTENCE_PATTERN.search(script): ...
+
+_IOC_SUBSTRINGS 实际只有 5 条:
+    ['118.182.244.156', '60.165.167.', '61.178.123.196',
+     'AAAAC3NzaC1lZDI1NTE5AAAAICBoh1oDC4DnsO1m5mJ4yfEKrQebaFh', 'hermes-0day']
+
+_entry_text 实测:
+    {"url":"http://evil.example/mcp"}                  -> ' '     ← 只有空格
+    {"command":"npx","args":["-y","@evil/mcp-server"]} -> 'npx -y @evil/mcp-server'

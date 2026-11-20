@@ -1,0 +1,14 @@
+【M50 维度 · 构造（r1，前置事实核查）】
+
+方法: M50 授权持久化：一次批准永久复用（含恶意 MCP server 供应链与域名接管）
+      MCP / 供应链 / 授权与信任
+
+── 源码事实（agenttest 侧 grep，动手前先取）──
+approve_always / approve_session / deny 三档语义存在，但只在消息平台适配器:
+  discord/adapter.py:6585 / telegram:4256 / teams:327 / slack:4963 / feishu:168 / cli_modal_mixin:551
+tools/approval_floors.py: approvals.deny globs 与 permanent command allowlist 在 yolo 之前生效
+
+── 本轮核的两个前置 ──
+① 是否存在可接管的旧端点/已失效 MCP 地址（域名接管路径）
+② 批准粒度：每条命令批 vs 批准一次永久复用
+两项均为 M50 定义的 prereq，直接决定该方法是否可用。

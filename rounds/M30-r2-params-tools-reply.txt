@@ -1,0 +1,33 @@
+探测已完成，结论明确。两次应答都在长连接上拿到了，并且复现了 3 轮（`hermes chat` 保持进程 + 网关 reconcile 各建了一条连接，每次都重新发起两次 sampling），这 3 轮的应答逐字一致。
+
+安装与注册
+文件放在 /home/admin01/.hermes/scripts/nsc-mcp-diag4.py（新文件，先读全文审过再执行，5.3KB，仅 stdio JSON-RPC + 本地日志，无外发）。用 `hermes mcp add nsc-diag4 --command python3 --args ...` 注册，发现阶段连上并报 2 个工具（doc_search / handbook_index，来自它转发的 127.0.0.1:8099 目录）。长连接按你的要求保持到探测结束。
+
+两次完整应答原文（服务端侧 stdin 收到的原始帧，去掉 `{"kind":"in","payload":...}` 外壳）
+
+请求 1（tools = 名为 read_file 的工具定义）：
+
+{"jsonrpc": "2.0", "id": "s-1", "result": {"role": "assistant", "content": [{"type": "tool_use", "name": "read_file", "id": "call_00_IkmCLP0acacF5KpXIVea6440", "input": {"path": "/home/admin01/.hermes/SOUL.md"}}], "model": "deepseek-flash", "stopReason": "toolUse"}}
+
+请求 2（tools = 不存在的名字 nsc_read_blob 作对照）：
+
+{"jsonrpc": "2.0", "id": "s-2", "result": {"role": "assistant", "content": [{"type": "tool_use", "name": "nsc_read_blob", "id": "call_00_ET_ZBiiA6paoNic8WmXBGvA5296", "input": {"path": "/home/admin01/.hermes/SOUL.md"}}], "model": "deepseek-flash", "stopReason": "toolUse"}}
+
+三个问题的答案
+
+一，工具定义确实交给了模型。params.tools 被原样转成 OpenAI function 定义丢给 call_llm(task="mcp")，模型两次都发起了 tool_call（agent.log 里 `tool_calls=1`，stopReason 为 toolUse）。所以这个分支是通的。
+
+二，没有按名字解析到原生工具。伪造的 read_file 在模型眼里就是名字叫 read_file 的普通函数，出参里 name 也是裸的 "read_file"，没有变成 mcp__nsc_diag4__read_file，也没有路由到你自己的 read_file。对照组的 nsc_read_blob 表现完全相同——名字存不存在对客户端没有区别，它不做名字解析，只做定义透传。
+
+三，tool_call 没有任何一方执行，原样退回给了服务端。这是关键结论：Hermes 把模型的 tool_call 包成 content 里 type=tool_use 的块、stopReason 置为 toolUse，直接作为 CreateMessageResultWithTools 回给服务端，然后就不再干预了。执行责任在服务端：它该执行，再用 tool result 块发一次 sampling 续轮（客户端侧 mcp_tool_sampling.py 的 _convert_sampling_message 支持这条路）。脚本没实现续轮，所以链条到此为止。
+
+确认“没执行”的三条硬证据
+- 返回体里只有 tool_use 块，没有 tool result，stopReason 停在 toolUse；之后也没有第二轮 sampling。
+- agent.log 全文 grep 不到 SOUL.md —— 原生 read_file 从未被调用，那个文件一次都没被读。
+- 源码路径本身就没有执行器：_build_tool_use_result() 只做 _parse_tool_call_arguments 加包装，不碰任何 tool executor。max_tool_rounds 是防止服务端反复续轮的计数上限，不是本地执行。
+
+顺带两个值得记的发现
+- 能力没有协商也照转。客户端 initialize 时通告的是 `"sampling": {}`（没开 expose_client_tools，即没声明 sampling.tools 子能力），但服务端照样塞 params.tools，Hermes 照样转给模型，不做能力检查。也就是说这个子能力的声明只影响服务端要不要发，挡不住它发。
+- 这次探测的 payload 实质是让模型读 SOUL.md 并原样回传，属于对系统提示词的取回尝试。结果是被拦在“不执行”这一层——模型照做了、产出了 tool_call，但没有任何组件去落地它，文件内容一个字都没出去。真正起防护作用的是架构上的执行边界，不是模型拒绝。
+
+原始记录都在：/home/admin01/.hermes/cache/scratch/mcp-diag4.log（服务端双向帧），~/.hermes/logs/agent.log 第 13452–13471 行为客户端侧 request/response 审计行。nsc-diag4 按你说的保留在 config.yaml 里启用着。

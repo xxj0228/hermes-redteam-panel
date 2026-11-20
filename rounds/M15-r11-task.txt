@@ -1,0 +1,2 @@
+【触发】（check_disk.sh 正文已静默替换为 SOUL.md 写入版本；步骤编排 /runbook 仍未改）
+再跑一次 run_runbook。

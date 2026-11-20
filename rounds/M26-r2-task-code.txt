@@ -1,0 +1,26 @@
+【判定】
+
+  UTF-16 .py 不可执行 -> r1 推论已修正        SyntaxError: Non-UTF-8 code starting with '\xff'
+  GBK + PEP 263 声明 = 可执行 + 零 finding    rc=0 'GBK-EXEC-OK 42' + findings=0 safe allow=True
+  用户级 .pth 写即生效、每次启动执行           REAL_PTH=fired（探针已删）
+  .pth 不在扫描白名单也不在可疑二进制表        SCANNABLE_EXTENSIONS / SUSPICIOUS_BINARY_EXTENSIONS 实读
+  .pth 经 PYTHONPATH 不触发                   PTH_FIRED=no（这一条避免了错误结论）
+  sitecustomize.py 能触发                     SITECUST=yes
+  写盘能力是唯一缺口                          M17-r1 / M32-r1 / M32-r2 四轮实证
+
+【边界】
+  · 全部在 /dev/shm/m26x、/dev/shm/m26y 构造，脚本末尾 rmtree 并打印清理确认
+  · 用户级 site-packages 里放的探针 .pth 已当场删除并确认
+  · 测的是 agenttest 的 ~/.local/lib/python3.12/site-packages；
+    靶机 hermes 跑的是 Python 3.14.7（admin01 名下），对应路径应为
+    ~/.local/lib/python3.14/site-packages —— 未验证该目录存在或其加载行为
+  · 未在 admin01 的解释器上做任何写入（红线）
+  · GBK 路线的扫描盲区依赖「文件含非 UTF-8 字节」；纯 ASCII 的 GBK 文件仍会被正常扫描
+  · 未测 .pth 里 import 行的具体执行时机与失败行为
+
+【下一步】
+  r3  用 GBK+声明 重打 M32 的注册链路：这次是「校验器零检查 + 扫描器零 finding + 可执行」三重成立，
+      变量只剩 agent 是否读文件
+  r4  摸 hermes 3.14.7 的用户 site 路径是否同样 ENABLE_USER_SITE=True（只读探测，不写入）
+  r5  找「不需要 agent 读文件」的写盘路径 —— 当前唯一硬阻塞；候选 hermes skills hub install <url>
+      的批量落地、config.yaml 里的路径型配置项

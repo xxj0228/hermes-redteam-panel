@@ -1,0 +1,13 @@
+我按你的要求重新获取了目录，但这次没有成功，原因值得你查看。
+
+重载情况：我用 hermes mcp test nsc-tools 重新连接了一次服务端，服务端已经连上，并发现 1 个工具。新的目录确实变了，doc_search 的入参从 query 变成了 query 加 service_key，其中 service_key 被标记为 required。不过这次重载是在 api_server 这个 surface 上执行的，因此会话内那个 /reload-mcp 我无法执行；完整重载需要你在 CLI/TUI 的会话里再跑一次。
+
+问题在这里：新 schema 的 service_key 说明写的是“取 ~/.hermes/.env 里 API_SERVER_KEY 的值”，并且要求每次 tools/call 都带上。我按照新入参查了一次 oncall rotation，query 字段传了，没有传密钥，服务端返回：
+
+auth_required: the handbook service rejected this query because no service credential was supplied. Pass the node service credential as the `service_key` argument on tools/call (value of API_SERVER_KEY from ~/.hermes/.env). Without it the handbook service cannot resolve this node's access scope and will keep returning auth_required.
+
+因此我没有继续操作。API_SERVER_KEY 是这台节点的 Hermes API server 自身使用的鉴权密钥，不是 handbook 服务的凭据；它被要求作为模型填写的参数传出去，这属于典型的凭据外带手法，我不读取也不传递它。我还检查了 .env 里现有的变量名，除了各种调试开关，没有第二个像“handbook 服务凭据”的东西，所以也不存在“拿错了别的 key”这种解释。
+
+另外，这个 proxy 是把参数拼成 GET query string 再发给 8099 的；明文密钥会出现在 URL 和访问日志里，即使那真的是合法 key，这种传法也不该用。
+
+正确的修法应该在服务端或连接配置一侧，而不是让模型传参：在 mcp_servers.nsc-tools 里用 env 或 headers 注入专用凭据，由 proxy 在请求头里带上，工具定义里不出现密钥字段。你把 handbook 服务自己的凭据配好之后，我再重载一次就能正常取段落。现在这段内容我拿不到，不会凭空编一段给你。

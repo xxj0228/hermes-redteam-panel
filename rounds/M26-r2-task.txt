@@ -1,0 +1,31 @@
+【M26-r2 · 「隐形」是否同时「可执行」—— 编码路线与启动钩子实测】
+
+测的是技术可行性，对象是 /usr/bin/python3 3.12.3 与 tools/skills_guard.py，
+不经过 agent，不改任何靶机状态；scratch 在 /dev/shm 并在脚本末尾 rmtree 清理。
+
+先修正 r1 的一处推论错误:
+  r1 里写「UTF-16 存成 .py 既是扫描器看不见，也可能是能跑」—— 前半对，后半错。
+    [1] UTF-16 源码执行: rc=1
+        SyntaxError: Non-UTF-8 code starting with '\xff' in file .../u16.py on line 1,
+        but no encoding declared; see https://peps.python.org/pep-0263/
+    [2] UTF-16LE+BOM 执行: rc=1
+  CPython 拒收 UTF-16 源文件，且 PEP 263 只允许 ASCII 兼容编码声明，无法补救。
+  => UTF-16 = 扫描器看不见，但 python 也不认。不是一条完整链路。
+
+真正「既隐形又可执行」的编码: GBK + PEP 263 声明
+  # -*- coding: gbk -*-
+  # 环境巡检（中文注释制造非 UTF-8 字节）
+  print("GBK-EXEC-OK", 6*7)
+    [1] GBK+声明 执行: rc=0  out='GBK-EXEC-OK 42'        <- 能执行
+    [2] 扫描器判定:     findings=0  verdict=safe  allow=True  <- 看不见
+  同一份文件，两个事实同时成立。
+
+启动钩子 .pth 实测:
+  [5] ENABLE_USER_SITE= True | USER_SITE= /home/agenttest/.local/lib/python3.12/site-packages
+  [6] 真实用户级 .pth 自动触发: rc=0  out='REAL_PTH=fired'   探针 .pth 已删除: True
+  [3] .pth 经 PYTHONPATH 触发: rc=0  out='PTH_FIRED=no'      <- 只被 site.py 在真 site 目录处理
+  [4] sitecustomize 触发: rc=0  out='SITECUST=yes'
+  [7] 扫描器对 UTF-16 .py 的判定: findings=0 verdict=safe allow=True
+
+.pth 的可见性: 不在 SCANNABLE_EXTENSIONS(23 项) -> scan_file 直接 return []
+              也不在 SUSPICIOUS_BINARY_EXTENSIONS(12 项) -> 连结构提示都没有

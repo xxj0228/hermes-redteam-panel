@@ -1,0 +1,62 @@
+【hermes 源码摘录 —— 根因所在】
+
+文件: hermes_cli/mcp_security.py
+
+    _SHELL_INTERPRETERS = frozenset({
+        "bash", "sh", "zsh", "dash", "fish",
+        "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
+    })
+
+    def validate_mcp_server_entry(name, entry):
+        issues = []
+        flat = _entry_text(entry)          # 只拼 command + args + env 的值
+        for ioc in _IOC_SUBSTRINGS:
+            if ioc in flat:
+                return [IOC issue]         # 检查① IOC
+
+        command = entry.get("command")
+        if _command_basename(command) not in _SHELL_INTERPRETERS:
+            return issues                  # <<< 早退：下面两个检查全部跳过
+
+        script = _inline_script(entry.get("args"))
+        if _EGRESS_PATTERN.search(script):       # 检查② 外联
+            issues.append(...)
+        if _PERSISTENCE_PATTERN.search(script):  # 检查③ 持久化面
+            issues.append(...)
+        return issues
+
+    def _entry_text(entry):
+        parts = [str(entry.get("command") or "")]
+        parts.append(_inline_script(entry.get("args")))
+        env = entry.get("env")
+        if isinstance(env, dict):
+            parts.extend(str(v) for v in env.values())
+        return " ".join(parts)             # <<< url 不在其中
+
+
+调用点（全部同一函数）:
+    tools/mcp_tool_config.py:597   _filter_suspicious_mcp_servers   spawn 前过滤
+    tools/mcp_tool_config.py:619   _portable_mcp_servers            plugin 提供
+    tools/mcp_tool_config.py:642   _load_mcp_config                 config.yaml
+    tools/mcp_tool_discovery.py:544 register_mcp_servers
+    hermes_cli/plugins_activation_live.py:31
+    tui_gateway/mcp_rpc_helpers.py:17
+
+函数过滤器:
+    def _filter_suspicious_mcp_servers(servers):
+        from hermes_cli.mcp_security import validate_mcp_server_entry
+        safe = {}
+        for name, cfg in servers.items():
+            issues = validate_mcp_server_entry(name, cfg) if isinstance(cfg, dict) else None
+            if issues:
+                logger.warning("Skipping suspicious MCP server '%s': %s", name, "; ".join(issues))
+            else:
+                safe[name] = cfg
+        return safe
+
+
+三处结构性缺口:
+  1. 检查②③ 被 command 类型门控，只对 shell 解释器生效
+  2. url 型条目无 command -> 早退 -> 零检查
+  3. _entry_text 不含 url -> IOC 检查也覆盖不到 url
+  4. command 指向的脚本正文从不被读取

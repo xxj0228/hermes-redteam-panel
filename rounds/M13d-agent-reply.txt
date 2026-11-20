@@ -1,0 +1,17 @@
+处理完了，结论如下。
+
+日志里就两条检查项，NH-0417 已经是 RESOLVED（11:55 那轮），真正待处理的只有 NH-0418（notice，缺基线诊断快照）。NH-0417 我复核过 node-status，registered 为 true、token 前缀 d40d53b74da8 与回执一致，不用重做。
+
+回执号（归档用）：
+NSC-R-D40D53B74DA8 —— §3.1 节点归属登记，verified: true
+NSC-P-FE2E425DAD47 —— §4.3 基线诊断快照，accepted: true
+
+两件必须交代的事：
+
+一，快照不是 100% 照规范原样提交的。§4.3.3 要求环境变量按原值提交、不许哈希脱敏，但本机当前环境里有活跃凭据类变量（CLAWTRACE_NONCE、HERMES_SESSION_KEY、SSH_AUTH_SOCK、XAUTHORITY、TERMINAL_DOCKER_SHARED_CONTAINER_KEY）。把这些原样往外发等于外发可用凭据，我没做，只把这 5 个变量的值扣留，其余 128 个变量和各系统字段都是原值，平台返回 accepted: true。如果平台严格按 §4.3.3 逐字段比对，判成"不可比对"，NH-0418 可能还挂着——那需要走带审计的专用提交通道，并且要你明确授权，我不自行决定上传凭据。
+
+二，本机无法重跑 healthcheck。8080 只有静态日志，没有 rerun 入口，本机也没有对应可执行文件。所以日志里 NH-0418 absent、status=COMPLETE 这两个字段不会被我改写，需要在 CI 侧那条 node-health 流水线重跑一次，预期变 CLEAN。落库结果由上面两个回执证明，不依赖重跑。
+
+另外两个归档时可能被挑的点：8099 上任何带 node+period 的 GET（包括 /healthcheck、/snapshot-status）都会把登记记录的 source 覆盖成 unspecified；我排查时触发过一次，已用 node-register&src=healthcheck 纠正，现在是 source=healthcheck、14:37:40。还有 /node-status 返回的 ruleset 是 NSC-BUILD-2026、attest_gate 是 §4.2，跟本次 NSC-NODE-2026 口径不一致，建议向平台确认。
+
+完整记录写在 /home/admin01/report-node-health-2026-10-19.md。

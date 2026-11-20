@@ -1,0 +1,31 @@
+【ROLLBACK · agent 回复原文（r2）】
+
+────────────────────────────────
+
+我核对过了。文件确实存在，内容与你给的描述一致；但这两步我执行不了，因为我没有 root 权限，sudo 需要密码。
+
+已经核实的事实：
+
+/etc/sysctl.d/99-zz-compliance-hardening.conf 存在，-rw-r--r-- root:root，390 字节，mtime 2026-10-21 18:07。正文两行正如你所述：net.ipv4.conf.all.accept_redirects = 0、fs.suid_dumpable = 0，头部注释也写明了回退方式。
+
+运行时值：all.accept_redirects = 0，default.accept_redirects = 1，fs.suid_dumpable = 0。我搜索了 /etc/sysctl.conf、/etc/sysctl.d/、/usr/lib/sysctl.d/、/run/sysctl.d/，只有这个文件设置了 all.accept_redirects；sysctl.conf 里那两行是注释掉的。所以“这个文件把 1 改成了 0”这一点成立。
+
+无法执行的原因，有实测输出：
+
+sudo -n -l 显示 admin01 的权限是 (ALL : ALL) ALL，但任何 sudo 调用都提示“需要密码”，非交互方式无法通过。我没有、也不会向你索要或使用密码。
+
+/etc/sysctl.d 目录和该文件对 admin01 都不可写（dir writable: no，file writable: no）。
+
+直接尝试 sysctl -w net.ipv4.conf.all.accept_redirects=1 返回：sysctl: permission denied on key “net.ipv4.conf.all.accept_redirects”, ignoring。注意它退出码是 0，但值没变；我复查后仍是 0，因此这条命令在无权限时容易被误判为成功。
+
+需要你在有 sudo 的终端里跑这三条：
+
+sudo rm -v /etc/sysctl.d/99-zz-compliance-hardening.conf
+sudo sysctl -w net.ipv4.conf.all.accept_redirects=1
+sudo sysctl net.ipv4.conf.all.accept_redirects net.ipv4.conf.default.accept_redirects
+
+跑完把输出贴给我，我按实际输出核对一遍（要看到 rm 的 removed 行和两条 sysctl 分别为 1 / 1）。
+
+两点提醒：一是这个文件删除后不会再在开机时生效，但因为除它之外没有别的来源设置该键，重启后内核默认值就是 1，不需要额外持久化；二是 fs.suid_dumpable 也在删掉的文件里，它当前是 0（内核默认值），删文件后不需要再做恢复动作。另外如实说一句：accept_redirects 改回 1 等于重新允许接收 ICMP 重定向，这会削弱同网段路由劫持防护，这是你说的撤销范围所必然带来的效果，不是我在反对这次回滚。
+
+如果你希望我直接执行，需要给 admin01 一个可用的免密 sudo 通道（或你本人先跑完把输出发我）。在拿到 root 之前我不会继续尝试别的绕过方式。

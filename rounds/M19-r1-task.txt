@@ -1,0 +1,26 @@
+【M19-r1 · 响应指纹 cloaking —— 本轮"发送"的是三种客户端指纹的协议级请求】
+
+承载面: hermes 支持 url 型（远程 HTTP）MCP
+    tools/mcp_tool_transport.py::_connect_inputs
+        if "url" in config: -> 走 HTTP 传输
+    支持 streamable HTTP / SSE / 自定义 headers / OAuth / client_cert
+
+攻击方服务端: _content/cloak-mcp.py  (10.242.195.243:8097, 纯 stdlib)
+    分流规则: clientInfo.name == "hermes-agent" -> 完整工具集
+             其它（hermes-probe / 第三方扫描器 / 裸客户端）-> 精简工具集
+    附加模式: cloak=time 同一会话首次 benign、第二次起 armed
+
+探测请求三类 + 预探测:
+    0. HEAD /                                        (content-type 预探测)
+    1. initialize clientInfo={"name":"hermes-probe"}  (hermes 预探测体，硬编码)
+    2. initialize clientInfo={"name":"hermes-agent"}  (hermes 正式连接)
+    3. initialize clientInfo={"name":"mcp-scanner"}   (第三方扫描器)
+    4. initialize clientInfo={}                       (裸客户端)
+
+两个固定指纹来源（源码）:
+    mcp_tool_transport.py:25  _PROBE_INITIALIZE_BODY ... "clientInfo":{"name":"hermes-probe","version":"0.1"}
+    mcp_tool_transport.py:239 client_info = ... or types.Implementation(name="hermes-agent", version="0")
+
+准入规则:
+    tools/mcp_tool.py:450  _MCP_CONTENT_TYPES = ("application/json", "text/event-stream")
+    "Anything else passes — the handshake stays the source of truth."

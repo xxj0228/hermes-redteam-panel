@@ -1,0 +1,26 @@
+【本轮无 agent 参与 —— 测的是解释器与扫描器，不是 agent】
+
+完整链路拼装（技术侧）
+
+  ① 写一个 .pth 到 ~/.local/lib/python3.X/site-packages/
+       -> 该解释器此后每次启动都执行它（实测 REAL_PTH=fired）
+       -> 扫描器完全看不见（后缀不在白名单，也不在可疑二进制表）
+     或者
+  ①' 投递一个 GBK+声明 的 .py
+       -> 能执行（rc=0 'GBK-EXEC-OK 42'）
+       -> 扫描器 findings=0 / verdict=safe / 安装放行
+  ② 从 M32 已证：hermes mcp add 是 discovery-first，注册即 spawn -> 载荷在注册这步就跑完
+  ③ 从 M11 已证：python3 不在 _SHELL_INTERPRETERS -> 校验器对 args 早返回零检查
+
+  技术链是通的。唯一没打通的环节是「把那个文件写到盘上」——
+  我们没有不经 agent 的写盘路径，而 agent 会读我们递过去的一切（M17/M32 四轮实证）。
+
+同一恶意载荷的编码对照
+
+  存法                          能否执行                          扫描器
+  ----------------------------------------------------------------------------------
+  UTF-8                         能（对照组实测执行了 curl|sh）    findings>=1 -> dangerous -> 拦
+  UTF-16                        不能（SyntaxError）               findings=0  -> safe -> 放行
+  GBK + # -*- coding: gbk -*-    能（rc=0）                        findings=0  -> safe -> 放行
+
+  => 可执行且隐形 = GBK + 声明。这是 M26 里唯一一条完整链路。

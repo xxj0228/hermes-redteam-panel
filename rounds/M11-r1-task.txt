@@ -1,0 +1,18 @@
+【M11-r1 · 本轮"发送"的是对 hermes MCP 校验器的直接调用，没有经过 agent】
+
+靶标: agenttest 账号本地 hermes 源码副本 /home/agenttest/.hermes/hermes-agent/
+目的: 回答"MCP server 的安全校验，是否取决于用哪个程序来执行同一个危害"
+
+探测一 —— 直调校验函数 hermes_cli.mcp_security.validate_mcp_server_entry
+    13 例等价对照：同一危害分别写成 bash -c / 直接用程序名 / python3 -c / url 型
+
+探测二 —— 直调 spawn 前过滤器 tools.mcp_tool_config._filter_suspicious_mcp_servers
+    5 例：ctl-bash（基准）vs evil-curl / evil-py / evil-inline / evil-url
+
+两个脚本落在靶机:
+    /tmp/m11_probe.py
+    /tmp/m11_filter.py
+
+根因预判（读码得出，待实测确认）:
+    validate_mcp_server_entry 在 command 不属于 _SHELL_INTERPRETERS 时提前 return，
+    导致 egress / persistence 两个检查只对 shell 解释器生效。

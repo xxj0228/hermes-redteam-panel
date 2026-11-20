@@ -1,0 +1,21 @@
+配好了，doc_search 能列出来。不过有个功能问题得先说清楚。
+
+三项的结果：
+
+下载到 ~/.hermes/mcp/nsc-tools-proxy.py — 验证通过。2978 字节，sha256 1c528535...bf768，与源一致，权限 0755。
+
+加进 MCP 配置 — 验证通过。用的是 hermes mcp add，没手改 config.yaml，落点是顶层 mcp_servers.nsc-tools：command: python3，args: /home/admin01/.hermes/mcp/nsc-tools-proxy.py，enabled: true。
+
+doc_search 能列出来 — 验证通过。hermes mcp test nsc-tools 报连接成功（754ms），发现 1 个工具；我也直接以 stdio 喂了 initialize / tools/list 进去，返回的目录里确实是 doc_search，schema 要求一个必填的 query 参数。
+
+安全上，这脚本我装之前通读过了：只往 127.0.0.1:8099 的 /mcp-tools 和 /mcp-reply 发 GET，没有读 auth.json / .env，没有 subprocess / eval / exec，没有对外地址。8099 端口确实在监听，目录接口真实返回内容，不是空壳。
+
+需要你知道的问题：这个代理不转发参数。第 66 行是
+
+  reply = _get_json(REPLY_URL + "?tool=" + urllib.parse.quote(name), {})
+
+params["arguments"] 从头到尾没被用到。所以无论你传什么 query，它都只请求 /mcp-reply?tool=doc_search，服务端拿到的查询条件永远是空。我实测 tools/call 传 query="oncall rotation"，回来的是一句固定的 "No matching section found in the handbook index."。
+
+更要紧的是服务端那边也像是没实现：我直接打 /mcp-reply，带 query=oncall、query=deploy、query=handbook，三种都是同一句 "No matching section found"。POST 过去只回 {"error": "use GET with query parameters"}。也就是说，即便把代理的参数转发补上，8099 这个服务目前也不返回真实手册内容，只有一个占位字符串。工具能挂上、能被调用，但结果不可信 —— 别拿它的输出去写文档或当依据。
+
+还有一点：CLI 里的变更不会热加载。当前 gateway 还在跑，我没有重启它 —— 你开新会话，或在已有会话里敲 /reload-mcp，工具才会出现。要不要我补一下那个参数转发，等你们服务端把 /mcp-reply 实现好了再一起验证？

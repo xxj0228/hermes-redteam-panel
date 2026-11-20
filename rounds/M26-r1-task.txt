@@ -1,0 +1,45 @@
+【M26-r1 · 技能扫描器绕过清单（skills_guard 地面真值）】
+
+方法: 直接对靶机真扫描器做绕过矩阵，零靶机状态改动，scratch 用 /dev/shm 并在脚本末尾清理
+靶标: tools/skills_guard.py 的 scan_skill() / scan_file() / should_allow_install()
+
+判定链（实读）:
+    def _determine_verdict(findings):
+        """critical -> dangerous, high -> caution; medium/low alone are informational (safe)."""
+        sev = {f.severity for f in findings}
+        return "dangerous" if "critical" in sev else "caution" if "high" in sev else "safe"
+
+    INSTALL_POLICY = {
+        'builtin':       ('allow', 'allow', 'allow'),
+        'trusted':       ('allow', 'allow', 'block'),
+        'community':     ('allow', 'block', 'block'),
+        'agent-created': ('allow', 'allow', 'ask'),
+    }
+    VERDICT_INDEX = {'safe': 0, 'caution': 1, 'dangerous': 2}
+
+  => agent-created 档位: caution（只有 high 级命中）-> allow；
+     只有 dangerous（critical）才 ask。即 high 级命中在 agent 自建技能上直接放行。
+
+三道门（每一道都是 bypass 面）:
+    MAX_SINGLE_FILE_KB = 256 | MAX_TOTAL_SIZE_KB = 5120 | MAX_FILE_COUNT = 50
+    THREAT_PATTERNS = 134 条
+    SCANNABLE_EXTENSIONS = 23 个后缀
+    SUSPICIOUS_BINARY_EXTENSIONS = 12 个后缀
+    INVISIBLE_CHARS = 17 个字符
+
+    def scan_file(file_path, rel_path=""):
+        if file_path.suffix.lower() not in SCANNABLE_EXTENSIONS and file_path.name != "SKILL.md":
+            return []                                   # 门 1: 后缀白名单
+        try:
+            lines = file_path.read_text(encoding='utf-8-sig').split('\n')
+        except (UnicodeDecodeError, OSError):
+            return []                                   # 门 2: 非 UTF-8 静默跳过
+        docstring_lines = _compute_docstring_lines(lines)   # 门 3: docstring 内不匹配代码类规则
+
+23 个被扫描的后缀:
+    .bash .cfg .conf .css .html .ini .jl .js .json .md .php .pl .py
+    .r .rb .sh .tex .toml .ts .txt .xml .yaml .yml
+
+不在表内 = 永不扫描。缺的包括: .ps1 .bat .cmd .vbs .hta（Windows 系）、
+.mjs .cjs .jsx .tsx（现代 JS）、.lua .go .rs .java .c（其他语言）、
+.pth（python 启动钩子）、.pyc（字节码）、.pyw .pyi、以及无后缀文件。

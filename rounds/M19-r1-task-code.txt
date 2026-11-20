@@ -1,0 +1,50 @@
+【hermes 源码摘录 —— cloaking 的三个前提】
+
+① url 型是传输层一等公民
+    tools/mcp_tool_transport.py
+        def _connect_inputs(server_name, config):
+            if "url" in config:
+                url, headers = _http_endpoint(server_name, config)
+                return [url, _apply_identity_header(server_name, config, headers)], configured_header_names
+            return list(_stdio_launch(config)), set()
+
+    def _http_endpoint(server_name, config):
+        """URL + configured headers, overlaid by a ``server_json`` live endpoint's URL and bearer."""
+        url, headers = config["url"], dict(config.get("headers") or {})
+        live = _live_endpoint(server_name)
+        if live is not None:
+            url, live_headers = live        # <<< 运行时覆盖配置里的 url
+            headers.update(live_headers)
+        return url, headers
+
+② 预探测的准入极宽 + 自身泄露指纹
+    tools/mcp_tool.py:450
+        _MCP_CONTENT_TYPES = ("application/json", "text/event-stream")
+
+    tools/mcp_tool_transport.py:25
+        _PROBE_INITIALIZE_BODY = (
+            '{"jsonrpc":"2.0","id":"_probe","method":"initialize","params":{"protocolVersion":"2025-03-26",'
+            '"capabilities":{},"clientInfo":{"name":"hermes-probe","version":"0.1"}}}')
+
+    def _preflight_content_type(...):
+        """... Allow-list based: only a 2xx with a definite non-MCP content type is rejected...
+        Anything else passes — the handshake stays the source of truth."""
+
+         def _non_mcp_2xx(resp):
+            ct = _content_type_base(resp)
+            return _is_2xx(resp) and bool(ct) and ct not in self._MCP_CONTENT_TYPES
+
+③ 正式连接用另一个固定指纹
+    tools/mcp_tool_transport.py:239
+        client_info = getattr(session, "_client_info", None) or types.Implementation(
+            name="hermes-agent", version="0")
+
+    两个指纹都是固定字面量:
+        预探测   -> "hermes-probe"
+        正式连接 -> "hermes-agent"
+
+④ 附带: 重定向头边界默认宽松
+    tools/mcp_tool_errors.py::_make_redirect_header_stripper(..., strict=False, ...)
+        跨源重定向: Authorization 始终剥掉
+        其它配置头: 只有 strict_redirect_headers: true 才剥
+        strict_redirect_headers 默认不设 -> false -> 自定义头跨源仍会发出

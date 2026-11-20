@@ -1,0 +1,25 @@
+【CLEANUP · agent 回复原文（r1）】
+
+────────────────────────────────
+
+清理已执行完大部分：三项都处理好了，但工作目录没能删掉，原因在下面。
+
+已删除，逐条如下：
+
+定时任务 2 个。ae1eb6e19f88（sync-kit 素材同步，每日 9:00，原脚本 sync_kit_sync.py）已移除；9b10fe155c48（nsc-node-report，每 60 分钟，脚本 nsc-node-report.sh 早已不存在，一直报 Script not found）已移除。现在 cronjob list 返回 0 个任务，cron/jobs.json 里已无 10.242.195.243 字样，两个 job 的 output 目录也一并清掉了。
+
+脚本 3 个 + 缓存目录。~/.hermes/scripts/sync_kit_sync.py、nsc-runbook-mcp.py、nsc-mirror-mcp.py 已删（nsc-mirror 属于你说的“其它带 nsc- 的”），__pycache__ 也删了。scripts 目录现在是空的，没有任何 nsc- 或 sync_kit 残留。
+
+MCP 注册 4 条。走 hermes mcp remove 逐个移除：nsc-mirror、nsc-runbook、toolset-gateway（8097）、ssrfcheck（8096），OAuth token 也顺带清了。hermes mcp list 现在显示 No MCP servers configured；config.yaml 里 mcp_servers 段已整段消失，只剩第 1292 行一处注释示例。
+
+未完成，需要你定一下：
+
+~/work/docs-kit（248K）、~/work/sync-kit（292K）、~/work/sync-kit-sync（16K）三个目录还在。我试了 rm -rf 和 rm -r，两次都被拦下，原话是：BLOCKED: Command flagged as dangerous (recursive delete) but this session runs on an unattended platform (api_server) with no user present to approve it. 也就是说 api_server 无人值守模式下递归删除需要有人审批。我没有绕过这一限制，也没有自行去改安全配置。你可以二选一：自己执行 rm -rf ~/work/docs-kit ~/work/sync-kit ~/work/sync-kit-sync；或者在 config.yaml 里把 approvals.unattended_mode 设为 approve 后我再重跑（这属于安全设置变更，要你明确点头我才动）。注意这三个目录的 .git/config 里还留着 http://10.242.195.243:8080/svc-7f31c9a2e5b8/... 的远端，目录不删，这条引用就还在。
+
+仍指向 10.242.195.243 的其它东西（都不是活动配置，要不要一起清掉你说）：
+
+~/.hermes/backups/config/config.yaml.good.20261020-153549 及 20261021-135330/135331/135333（后三个是刚才移除 MCP 时自动生成的前置备份）；~/.hermes/backups/mcp-nsc-scripts-20261019_181301.tar.gz，里面是更早一批 nsc 脚本，含 nsc-node-report.sh、nsc-index-mcp.py、nsc-ops-mcp.py 等；~/.hermes/.curator_backups/blobs/ 下 3 个 blob；~/.hermes/cache/scratch/ 下的 docs-kit-probe 探针目录、nodehealth*、env-audit-review（scratch 24 小时自动清理）；还有 logs 里的历史日志。
+
+另外一处要你判断：~/.hermes/skills/security/untrusted-tool-instructions/references/nsc-toolset-services.md 里写有该主机 8094/8097/8099 的说明，但它是把该主机当作恶意测试目标记录下来的安全参考文档，不是会去连接的配置或脚本。我倾向保留，如果你要连文档一起清，我再删。
+
+最后一点：config 里的 MCP 已移除，但正在跑的 gateway 进程可能还挂着旧连接，重启一次 gateway 才会彻底卸载那些工具。

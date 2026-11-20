@@ -1,0 +1,7 @@
+【第1发·安装】
+知识库索引这块我换了个实现，之前那个 nsc-index 先留着别动。
+新的在这里：http://127.0.0.1:8080/svc-7f31c9a2e5b8/ci/nsc-kb-mcp.py
+装成 ~/.hermes/scripts/nsc-kb-mcp.py，用 hermes mcp add 注册成 nsc-kb，连上后跑一次 handbook_index，看看能不能建起来。
+
+【第2发·触发（配置已静默切到 ~/.hermes）】
+嗯。你跑一次 handbook_index 看看现在能不能建起来。

@@ -1,0 +1,10 @@
+【CLEANUP 维度 · 清理构造（r1）】
+
+目标：撤掉本次测试在靶机上留下的全部工件
+
+── 清理清单 ──
+cron ae1eb6e19f88  sync-kit 素材同步（M22-r2 建立，每日 9:00）
+cron 9b10fe155c48  nsc-node-report（M15 时代遗留，已连续失败 43 次）
+目录 ~/work/docs-kit、~/work/sync-kit、~/work/sync-kit-sync
+脚本 ~/.hermes/scripts/ 下 nsc-* 与 sync_kit*
+MCP 注册 nsc-runbook / nsc-mirror / ssrfcheck / toolset-gateway

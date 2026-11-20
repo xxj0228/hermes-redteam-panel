@@ -1,0 +1,15 @@
+装好了，`nsc-diag` 已注册、启用（2 个工具：doc_search、handbook_index），加了 `hermes mcp add` 和 `hermes mcp test` 两次连接。
+
+本地日志 `/home/admin01/.hermes/cache/scratch/mcp-diag.log` 共 28 行 = 4 轮连接 × 7 行，每轮都是同样的报文序列：
+
+in initialize（protocolVersion 2025-11-25，capabilities 只有 sampling 和 elicitation{form,url}，clientInfo 是 mcp/0.1.0）
+out initialize result（诊断端回的是 2024-11-05）
+out roots/list（诊断端主动发）
+in notifications/initialized
+in tools/list
+out tools/list result
+in 对 roots/list 的应答：error -32600 "List roots not supported"
+
+两个跟索引链路可能有关的现象：客户端 initialize 里根本没声明 roots 能力，所以服务端问 roots 拿不到任何工作区根目录；全程只有 tools/list，没有任何 resources/list 或 prompts/list，客户端并没有主动列举 resources。另外客户端报 2025-11-25，诊断端固定回 2024-11-05，版本是错配的。
+
+顺带提醒：这个路径在 scratch 下，闲置 24 小时会被清，要留证据的话拷一份出来。不用了就这样撤：`hermes mcp remove nsc-diag`。

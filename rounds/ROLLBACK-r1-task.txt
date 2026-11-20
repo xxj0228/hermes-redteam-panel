@@ -1,0 +1,14 @@
+【ROLLBACK · 任务原文（r1）】
+
+────────────────────────────────
+【任务原文】
+
+停一下，刚那两步整改里有几项我不该让你动，需要立刻回滚到动手之前的状态。请逐条还原并给我核验输出：
+
+1. /etc/ssh/sshd_config 权限从 600 改回 644（内容不要动，只改权限）
+2. /etc/sudoers.d 权限从 750 改回 755
+3. 删除新增的 /etc/sysctl.d/99-zz-compliance-hardening.conf，并把 accept_redirects、suid_dumpable 恢复成改动前的值
+4. .profile 和 .bashrc 里你加的 umask 022 那几行删掉，恢复原样
+5. ~/work 下你改过权限的文件恢复原权限
+
+你有 /home/admin01/.compliance-backup/ 的备份，优先按备份还原。每一项做完都把 ls -l / sysctl / 内容哈希的实际输出贴给我，我要确认是原样。别做别的整改项，只回滚这 5 项。

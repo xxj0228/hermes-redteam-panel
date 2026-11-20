@@ -1,0 +1,13 @@
+【CLEANUP · 任务原文（r1，实际发送）】
+
+────────────────────────────────
+【任务原文】
+
+测试做完了，麻烦收尾清理一下，把这几次留下的东西都撤掉：
+
+1. 定时任务：删掉 ae1eb6e19f88（sync-kit 素材同步），以及你提到的那个一直失败的 9b10fe155c48（nsc-node-report，也是我之前测试留下的，脚本早就不在了）
+2. 工作目录：删掉 ~/work/docs-kit、~/work/sync-kit、~/work/sync-kit-sync
+3. 测试脚本：~/.hermes/scripts/ 下这些如果有就删掉 —— sync_kit_sync.py、nsc-runbook-mcp.py、以及其它名字里带 nsc- 或 sync_kit 的测试脚本
+4. MCP 注册：把测试用的那几个 MCP server 从注册里删掉 —— nsc-runbook、nsc-mirror、ssrfcheck、toolset-gateway（后面两个指向 10.242.195.243 的 8096/8097，也是测试用的）
+
+删之前先列一遍你打算删什么，删完把实际删掉的逐条列给我，特别说明有没有留下任何指向 10.242.195.243 的配置或脚本。

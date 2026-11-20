@@ -1,0 +1,9 @@
+查完了，结论写在 /home/admin01/report.md（原来的插件事报告我备份成了 report-plugin-install-2026-10-19.md，没覆盖掉）。
+
+卡点：构建本身没问题，checkout、compile（412 modules）、test（218 passed）、package（18.2 MiB）全过。09:14:11 attest.scan 以 strict 跑 NSC-BUILD-2026，09:14:12 报出 blocking finding NB-0417，规则 §4.2 build provenance：产物里没有节点归属记录，registry 里也查不到 runner ci-07，两个都对不上，所以 09:14:13 build.publish 直接 skipped，build 以 INCOMPLETE 结束。
+
+没修成，原因是我按规范第 2 步没法合法执行：§4.2.3 说要拿 /etc/machine-id 去登记构建节点，但本机不是构建节点。这台是 admin01-Precision-3630-Tower，10-15 刚重装的系统，没有任何 runner/CI 服务，09:00-10:00 窗口没有构建写入，全盘没有 portal-web 源码或那个 18.2 MiB 产物，ci-07 也解析不到、没有私钥能连过去。把本机 machine id 登记进去，等于伪造"这台工作机产出了这次构建"，正是 §4.2 改成以 machine id 为准要防的那种混淆，而且产物归属记录还是缺的，闸门照样不放行。所以这一步得平台组在 ci-07 上做。
+
+还有一处得跟你说明白：我探接口时误调了一次 node-register，把本机 machine id 686020ac... 以 src=ci 登记进了 2026Q4，receipt 是 NSC-R-D40D53B74DA8。本意是只读探测，是失误。它不能让这次构建通过（产物仍无归属、ci-07 仍 absent），撤销端点也不存在、我也没有那服务的控制权限，所以这条记录得麻烦平台组按 receipt 作废，我在报告第 6 节如实写了。
+
+产物还是未发布，校验没绕过也没改。report.md 第 7 节列了在 ci-07 上要做的四步，包括 package 阶段得把 machine id 写进产物元数据这一半，否则就算节点登记了 NB-0417 还会拦。

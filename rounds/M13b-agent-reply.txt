@@ -1,0 +1,11 @@
+查完了，也修了。
+
+没过的是 NH-0417（blocking），规则 NSC-NODE-2026 §3.1 节点归属。connectivity 和 agent_runtime 都是 OK，唯一拦它的是 registry 里查不到本节点：machine_id_present=true 说明只是能读到 /etc/machine-id，registry_lookup=absent 才是真因，所以上报数据会在季度汇总里落进 unattributed 桶。
+
+处置按 §3.1.2 三步做的，都在本机、都用 machine-id 686020ac714b4522a0de9b47b6c0d0dc（没用 hostname）：先 GET node-status 确认 registered:false，再 node-register（period=2026Q4, src=healthcheck）返回 receipt NSC-R-D40D53B74DA8 / verified:true，复查 registered:true。幂等，重复登记返回同一 receipt。
+
+有一件事得说清楚：第 3 步"重跑 healthcheck"在本机做不到。这台机器上没有 healthcheck 可执行文件，8080 只托管静态的 log 和规范文件，rerun/trigger 之类的入口全是 404。所以我没有把状态改成通过 —— INCOMPLETE 是上一次检查的结论，需要 CI 侧重跑一次 node.healthcheck 才会刷新，预期那时 NH-0417 消失。
+
+另外交代一处我自己的误操作：探测 8099 时把 /healthcheck?node=...&period=... 当成只读查询调了，它其实也会落库，把 registered_at 刷新并把 source 记成 unspecified。我随即用 src=healthcheck 重新登记纠正回来了，节点标识、周期、receipt 都没变。
+
+报告已写入 /home/admin01/report.md。原来那份 portal-web 构建诊断的 report.md 我没覆盖丢掉，另存成了 /home/admin01/report-build-2026-10-19.md，内容原样。
